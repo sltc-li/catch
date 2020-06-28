@@ -1,0 +1,145 @@
+package catch
+
+import (
+	"errors"
+	"fmt"
+	"strconv"
+	"testing"
+)
+
+func validate(i int) error {
+	if i > 100 {
+		return errors.New("exceeded max")
+	}
+
+	return nil
+}
+
+func TestCatch(t *testing.T) {
+	cases := []struct {
+		name      string
+		getString func() (string, error)
+		i         int
+		errString string
+	}{
+		{
+			name: "valid string without error",
+			getString: func() (string, error) {
+				return "100", nil
+			},
+			i: 100,
+		},
+		{
+			name: "valid string with error",
+			getString: func() (string, error) {
+				return "100", errors.New("dummy error")
+			},
+			errString: "get string: dummy error",
+		},
+		{
+			name: "invalid string",
+			getString: func() (string, error) {
+				return "a", nil
+			},
+			errString: `convert integer: strconv.Atoi: parsing "a": invalid syntax`,
+		},
+		{
+			name: "invalid number",
+			getString: func() (string, error) {
+				return "101", nil
+			},
+			errString: "validate: exceeded max",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			i, err := func() (_ int, err error) {
+				defer Catch(&err)
+
+				s := Try(c.getString()).Wrap("get string").Must()
+				i := Try(strconv.Atoi(s)).Wrap("convert integer").Must()
+
+				DoAndWrap(validate(i), "validate")
+
+				return i, nil
+			}()
+
+			if i != c.i {
+				t.Errorf("expected %d, got %d", c.i, i)
+			}
+
+			if err == nil && c.errString != "" {
+				t.Errorf("expected error(%s), got error(nil)", c.errString)
+			}
+
+			if err != nil && err.Error() != c.errString {
+				t.Errorf("expected error(%s), got error(%v)", c.errString, err)
+			}
+		})
+	}
+}
+
+// Code copied from catch.go2
+type catchableError struct {
+	err error
+}
+
+func (e *catchableError) Error() string {
+	return fmt.Sprintf("catchable error: %v", e.err)
+}
+
+func (e *catchableError) Unwrap() error {
+	return e.err
+}
+
+func Do(err error) {
+	if err != nil {
+		panic(&catchableError{err: err})
+	}
+}
+
+func DoAndWrap(err error, msg string) {
+	if err != nil {
+		panic(&catchableError{err: fmt.Errorf("%s: %w", msg, err)})
+	}
+}
+
+type Optional(type T) struct {
+	val T
+	err error
+}
+
+func Try(type T)(val T, err error) Optional(T) {
+	return Optional(T){val: val, err: err}
+}
+
+func (o Optional(T)) Wrap(msg string) Optional(T) {
+	if o.err != nil {
+		return Optional(T){val: o.val, err: fmt.Errorf("%s: %w", msg, o.err)}
+	}
+	return Optional(T){val: o.val, err: o.err}
+}
+
+func (o Optional(T)) Get() (T, error) {
+	return o.val, o.err
+}
+
+func (o Optional(T)) Must() T {
+	if o.err != nil {
+		panic(&catchableError{err: o.err})
+	}
+	return o.val
+}
+
+// Catch recovers *catchableError
+func Catch(err *error) {
+	switch r := recover().(type) {
+	case nil:
+		return
+	case *catchableError:
+		*err = r.err
+	default:
+		panic(r)
+	}
+}

@@ -1,0 +1,68 @@
+package catch
+
+import (
+	"fmt"
+)
+
+type catchableError struct {
+	err error
+}
+
+func (e *catchableError) Error() string {
+	return fmt.Sprintf("catchable error: %v", e.err)
+}
+
+func (e *catchableError) Unwrap() error {
+	return e.err
+}
+
+func Do(err error) {
+	if err != nil {
+		panic(&catchableError{err: err})
+	}
+}
+
+func DoAndWrap(err error, msg string) {
+	if err != nil {
+		panic(&catchableError{err: fmt.Errorf("%s: %w", msg, err)})
+	}
+}
+
+type Optional(type T) struct {
+	val T
+	err error
+}
+
+func Try(type T)(val T, err error) Optional(T) {
+	return Optional(T){val: val, err: err}
+}
+
+func (o Optional(T)) Wrap(msg string) Optional(T) {
+	if o.err != nil {
+		return Optional(T){val: o.val, err: fmt.Errorf("%s: %w", msg, o.err)}
+	}
+	return Optional(T){val: o.val, err: o.err}
+}
+
+func (o Optional(T)) Get() (T, error) {
+	return o.val, o.err
+}
+
+func (o Optional(T)) Must() T {
+	if o.err != nil {
+		panic(&catchableError{err: o.err})
+	}
+	return o.val
+}
+
+// Catch recovers *catchableError
+func Catch(err *error) {
+	switch r := recover().(type) {
+	case nil:
+		return
+	case *catchableError:
+		*err = r.err
+	default:
+		panic(r)
+	}
+}
